@@ -1,4 +1,54 @@
 ~~~~~~~~~~~~~~~~
+version 1.0
+~~~~~~~~~~~~~~~~
+
+* added automatic default website for when using TrevorC2 if no connection available (i.e. cant clone website) - will spawn a It Works! site.
+* added ability to list ifconfig for connection within trevorc2 prompt
+
+~~~~~~~~~~~~~~~~
+version 0.9
+~~~~~~~~~~~~~~~~
+
+* add error handling to import modules
+
+~~~~~~~~~~~~~~~~
+version 0.8
+~~~~~~~~~~~~~~~~
+
+* fix tornado asyncio issues for python3 and tornado 5.0+
+
+~~~~~~~~~~~~~~~~
+version 0.7
+~~~~~~~~~~~~~~~~
+
+* added a full interactive shell management system for TrevorC2
+
+~~~~~~~~~~~~~~~~
+version 0.6
+~~~~~~~~~~~~~~~~
+
+* adds full session management for multiple TrevorC2 clients
+
+~~~~~~~~~~~~~~~~
+version 0.5
+~~~~~~~~~~~~~~~~
+
+* moved trevorc2_client.py to python 2 and 3 compatible
+* added error handling if server address was in use in trevorc2_server
+
+~~~~~~~~~~~~~~~~
+version 0.4
+~~~~~~~~~~~~~~~~
+
+* add PowerShell client thanks to Alex Williams (@offsec_ginger)
+
+~~~~~~~~~~~~~~~~
+version 0.3.2
+~~~~~~~~~~~~~~~~
+
+* change padding to 16 bit to be compatible with PowerShell native. New PS client coming soon.
+
+~~~~~~~~~~~~~~~~
 version 0.3.1
 ~~~~~~~~~~~~~~~~
 
